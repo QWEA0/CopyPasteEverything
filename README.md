@@ -10,10 +10,11 @@ A lightweight, geek-style clipboard synchronization tool for Windows. Seamlessly
 
 - **🚀 Lightweight & Fast** - Minimal resource usage, instant clipboard sync
 - **🔄 Real-time Sync** - Automatic clipboard synchronization across devices
-- **🌐 Auto Tunnel** - Built-in tunnel support for remote connections
+- **🌐 Auto Tunnel** - Built-in Cloudflare Tunnel for remote connections (no port forwarding needed)
 - **📜 History Management** - Browse, search, and restore clipboard history
-- **🎨 Geek-style UI** - Terminal/Matrix-inspired dark theme
-- **🔒 Secure** - Optional password protection for connections
+- **🎨 Geek-style UI** - Terminal/Matrix-inspired dark theme with animated status indicators
+- **📊 Live Status** - Real-time status indicators for server, tunnel, and sync states
+- **🔒 Secure** - WSS encrypted connections via Cloudflare Tunnel
 - **💾 Persistent Storage** - SQLite-based history that survives restarts
 
 ## 📸 Screenshots
@@ -29,7 +30,7 @@ A lightweight, geek-style clipboard synchronization tool for Windows. Seamlessly
 │                                                 │
 │  CONNECTION URL:                                │
 │  ┌─────────────────────────────────────────┐   │
-│  │ ws://192.168.1.100:8765                 │   │
+│  │ ws://192.168.1.100:2580                 │   │
 │  └─────────────────────────────────────────┘   │
 │                                                 │
 │  [▶ START SERVER]     Connected: 2 clients     │
@@ -42,7 +43,7 @@ A lightweight, geek-style clipboard synchronization tool for Windows. Seamlessly
 
 ```bash
 # Clone the repository
-git clone https://github.com/yourusername/CopyPasteEverything.git
+git clone https://github.com/QWEA0/CopyPasteEverything.git
 cd CopyPasteEverything
 
 # Run the installer (Windows)
@@ -109,7 +110,7 @@ Configuration is stored in `%APPDATA%/CopyPasteEverything/config.json`:
 
 | Option | Default | Description |
 |--------|---------|-------------|
-| `server_port` | 8765 | WebSocket server port |
+| `server_port` | 2580 | WebSocket server port |
 | `tunnel_enabled` | true | Enable auto tunnel |
 | `auto_sync` | true | Auto sync clipboard |
 | `max_history_items` | 100 | Max history entries |

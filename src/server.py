@@ -25,7 +25,7 @@ class ClipboardServer:
     
     def __init__(
         self,
-        port: int = 8765,
+        port: int = 2580,
         on_log: Optional[Callable[[str], None]] = None,
         on_client_change: Optional[Callable[[int], None]] = None,
         on_clipboard_received: Optional[Callable[[ClipboardItem], None]] = None
@@ -174,7 +174,7 @@ class ClipboardServer:
         self._running = False
         if self._server:
             self._server.close()
-        if self._loop:
+        if self._loop and self._loop.is_running():
             self._loop.call_soon_threadsafe(self._loop.stop)
     
     @property

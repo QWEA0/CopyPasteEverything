@@ -25,7 +25,7 @@ DATA_DIR.mkdir(parents=True, exist_ok=True)
 class Config:
     """Application configuration dataclass"""
     # Network settings
-    server_port: int = 8765
+    server_port: int = 2580
     tunnel_enabled: bool = True
     tunnel_subdomain: str = ""
     

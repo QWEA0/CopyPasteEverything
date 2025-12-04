@@ -57,10 +57,10 @@ class TerminalLog(ctk.CTkTextbox):
 
 class StatusIndicator(ctk.CTkFrame):
     """Status indicator with pulsing dot and label"""
-    
+
     def __init__(self, master, label: str = "Status", **kwargs):
         super().__init__(master, fg_color="transparent", **kwargs)
-        
+
         self._dot = ctk.CTkLabel(
             self,
             text="●",
@@ -69,7 +69,7 @@ class StatusIndicator(ctk.CTkFrame):
             width=20
         )
         self._dot.pack(side="left", padx=(0, 5))
-        
+
         self._label = ctk.CTkLabel(
             self,
             text=label,
@@ -77,18 +77,38 @@ class StatusIndicator(ctk.CTkFrame):
             text_color=theme.text_secondary
         )
         self._label.pack(side="left")
-    
+
+        self._status = "offline"
+        self._blinking = False
+
     def set_status(self, status: str, label: str = None):
         """Update status indicator"""
         colors = {
             "online": theme.accent_green,
             "offline": theme.accent_red,
             "connecting": theme.accent_orange,
-            "syncing": theme.accent_cyan
+            "syncing": theme.accent_cyan,
+            "waiting": theme.accent_purple
         }
+        self._status = status
         self._dot.configure(text_color=colors.get(status, theme.text_muted))
         if label:
             self._label.configure(text=label)
+
+        # Start/stop blinking for connecting state
+        if status == "connecting" and not self._blinking:
+            self._blinking = True
+            self._blink()
+        elif status != "connecting":
+            self._blinking = False
+
+    def _blink(self):
+        """Blink animation for connecting state"""
+        if not self._blinking:
+            return
+        current = self._dot.cget("text")
+        self._dot.configure(text="○" if current == "●" else "●")
+        self.after(500, self._blink)
 
 
 class GlowButton(ctk.CTkButton):

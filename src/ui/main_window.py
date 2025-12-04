@@ -73,10 +73,13 @@ class MainWindow(ctk.CTk):
         # Status indicators
         status_frame = ctk.CTkFrame(header, fg_color="transparent")
         status_frame.pack(side="right", padx=20)
-        
+
+        self._tunnel_status = StatusIndicator(status_frame, "Tunnel: -")
+        self._tunnel_status.pack(side="left", padx=(0, 15))
+
         self._server_status = StatusIndicator(status_frame, "Server: OFF")
         self._server_status.pack(side="left", padx=(0, 15))
-        
+
         self._client_status = StatusIndicator(status_frame, "Client: OFF")
         self._client_status.pack(side="left")
     
@@ -157,24 +160,43 @@ class MainWindow(ctk.CTk):
             command=self._copy_server_url
         ).pack(anchor="w", padx=15, pady=(0, 15))
         
-        # Controls
-        controls = ctk.CTkFrame(tab, fg_color="transparent")
-        controls.pack(fill="x", padx=10, pady=20)
-        
-        self._start_server_btn = GlowButton(
-            controls, text="▶ START SERVER", width=150, height=40,
-            command=self._toggle_server
-        )
-        self._start_server_btn.pack(side="left", padx=5)
-        
-        # Clients count
+        # Status panel
+        status_panel = ctk.CTkFrame(tab, fg_color=theme.bg_light)
+        status_panel.pack(fill="x", padx=10, pady=5)
+
+        ctk.CTkLabel(
+            status_panel,
+            text="STATUS:",
+            font=(theme.font_mono, theme.font_size_small),
+            text_color=theme.text_muted
+        ).pack(anchor="w", padx=15, pady=(10, 5))
+
+        status_row = ctk.CTkFrame(status_panel, fg_color="transparent")
+        status_row.pack(fill="x", padx=15, pady=(0, 10))
+
+        self._server_detail_status = StatusIndicator(status_row, "Server: Stopped")
+        self._server_detail_status.pack(side="left", padx=(0, 20))
+
+        self._tunnel_detail_status = StatusIndicator(status_row, "Tunnel: Not active")
+        self._tunnel_detail_status.pack(side="left", padx=(0, 20))
+
         self._clients_label = ctk.CTkLabel(
-            controls,
-            text="Connected: 0 clients",
+            status_row,
+            text="👥 0 clients",
             font=(theme.font_mono, theme.font_size_normal),
             text_color=theme.text_secondary
         )
-        self._clients_label.pack(side="left", padx=20)
+        self._clients_label.pack(side="left")
+
+        # Controls
+        controls = ctk.CTkFrame(tab, fg_color="transparent")
+        controls.pack(fill="x", padx=10, pady=15)
+
+        self._start_server_btn = GlowButton(
+            controls, text="▶ START SERVER", width=160, height=40,
+            command=self._toggle_server
+        )
+        self._start_server_btn.pack(side="left", padx=5)
 
     def _create_client_tab(self):
         """Create client control tab"""
@@ -218,16 +240,36 @@ class MainWindow(ctk.CTk):
             text_color=theme.accent_green,
             border_color=theme.border_default,
             width=400,
-            placeholder_text="ws://hostname:8765"
+            placeholder_text="ws://hostname:2580"
         )
         self._client_url_entry.pack(anchor="w", padx=15, pady=(0, 15))
 
+        # Status panel
+        status_panel = ctk.CTkFrame(tab, fg_color=theme.bg_light)
+        status_panel.pack(fill="x", padx=10, pady=5)
+
+        ctk.CTkLabel(
+            status_panel,
+            text="STATUS:",
+            font=(theme.font_mono, theme.font_size_small),
+            text_color=theme.text_muted
+        ).pack(anchor="w", padx=15, pady=(10, 5))
+
+        status_row = ctk.CTkFrame(status_panel, fg_color="transparent")
+        status_row.pack(fill="x", padx=15, pady=(0, 10))
+
+        self._client_detail_status = StatusIndicator(status_row, "Connection: Not connected")
+        self._client_detail_status.pack(side="left", padx=(0, 20))
+
+        self._sync_status = StatusIndicator(status_row, "Sync: Idle")
+        self._sync_status.pack(side="left")
+
         # Controls
         controls = ctk.CTkFrame(tab, fg_color="transparent")
-        controls.pack(fill="x", padx=10, pady=20)
+        controls.pack(fill="x", padx=10, pady=15)
 
         self._connect_btn = GlowButton(
-            controls, text="🔗 CONNECT", width=150, height=40,
+            controls, text="🔗 CONNECT", width=160, height=40,
             accent=theme.accent_purple,
             command=self._toggle_client
         )
@@ -329,32 +371,69 @@ class MainWindow(ctk.CTk):
         """Add message to log display"""
         self._log_display.append(message)
 
-    def set_server_running(self, running: bool, url: str = None):
+    def set_server_running(self, running: bool, url: str = ""):
         """Update server status"""
         self._server_running = running
         if running:
             self._server_status.set_status("online", "Server: ON")
+            self._server_detail_status.set_status("online", "Server: Running")
             self._start_server_btn.configure(text="■ STOP SERVER")
             if url:
                 self._server_url_var.set(url)
+                # Update tunnel status based on URL
+                if "trycloudflare.com" in url:
+                    self._tunnel_status.set_status("online", "Tunnel: ON")
+                    self._tunnel_detail_status.set_status("online", "Tunnel: Connected")
+                elif "localhost" in url or "127.0.0.1" in url:
+                    self._tunnel_status.set_status("connecting", "Tunnel: ...")
+                    self._tunnel_detail_status.set_status("connecting", "Tunnel: Connecting...")
+                else:
+                    self._tunnel_status.set_status("waiting", "Tunnel: LAN")
+                    self._tunnel_detail_status.set_status("waiting", "Tunnel: LAN only")
         else:
             self._server_status.set_status("offline", "Server: OFF")
+            self._server_detail_status.set_status("offline", "Server: Stopped")
+            self._tunnel_status.set_status("offline", "Tunnel: -")
+            self._tunnel_detail_status.set_status("offline", "Tunnel: Not active")
             self._start_server_btn.configure(text="▶ START SERVER")
             self._server_url_var.set("Not running")
+
+    def set_tunnel_status(self, status: str, label: str):
+        """Update tunnel status indicator"""
+        self._tunnel_status.set_status(status, label)
+        self._tunnel_detail_status.set_status(status, label)
 
     def set_client_connected(self, connected: bool):
         """Update client status"""
         self._client_connected = connected
         if connected:
             self._client_status.set_status("online", "Client: ON")
+            self._client_detail_status.set_status("online", "Connection: Connected")
+            self._sync_status.set_status("online", "Sync: Ready")
             self._connect_btn.configure(text="✖ DISCONNECT")
         else:
             self._client_status.set_status("offline", "Client: OFF")
+            self._client_detail_status.set_status("offline", "Connection: Disconnected")
+            self._sync_status.set_status("offline", "Sync: Idle")
             self._connect_btn.configure(text="🔗 CONNECT")
+
+    def set_client_connecting(self):
+        """Set client to connecting state"""
+        self._client_status.set_status("connecting", "Client: ...")
+        self._client_detail_status.set_status("connecting", "Connection: Connecting...")
+        self._sync_status.set_status("waiting", "Sync: Waiting")
+        self._connect_btn.configure(text="⏳ CONNECTING")
+
+    def show_sync_activity(self):
+        """Flash sync indicator to show activity"""
+        self._sync_status.set_status("syncing", "Sync: Syncing...")
+        # Reset after 1 second
+        self.after(1000, lambda: self._sync_status.set_status("online", "Sync: Ready")
+                   if self._client_connected else None)
 
     def set_client_count(self, count: int):
         """Update connected clients count"""
-        self._clients_label.configure(text=f"Connected: {count} clients")
+        self._clients_label.configure(text=f"👥 {count} client{'s' if count != 1 else ''}")
 
     def update_history(self, items: list):
         """Update history display"""

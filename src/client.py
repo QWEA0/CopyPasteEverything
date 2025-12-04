@@ -171,12 +171,12 @@ class ClipboardClient:
     def stop(self):
         """Stop the client"""
         self._running = False
-        if self._websocket:
+        if self._websocket and self._loop and self._loop.is_running():
             asyncio.run_coroutine_threadsafe(
                 self._websocket.close(),
                 self._loop
             )
-        if self._loop:
+        if self._loop and self._loop.is_running():
             self._loop.call_soon_threadsafe(self._loop.stop)
     
     @property

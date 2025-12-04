@@ -59,9 +59,9 @@ class ClipboardSyncApp:
         """Start server mode"""
         if self._server:
             return
-        
+
         self._log("Starting server...")
-        
+
         # Create and start server
         self._server = ClipboardServer(
             port=config.server_port,
@@ -70,25 +70,47 @@ class ClipboardSyncApp:
             on_clipboard_received=self._on_remote_clipboard
         )
         self._server.start()
-        
-        # Start tunnel if enabled
-        url = f"ws://localhost:{config.server_port}"
-        if config.tunnel_enabled:
-            self._tunnel = TunnelManager(
-                local_port=config.server_port,
-                on_status=self._log
-            )
-            tunnel_info = self._tunnel.start()
-            if tunnel_info:
-                url = tunnel_info.public_url
-        
+
         # Start clipboard monitor
         self._monitor.start()
-        
-        # Update UI
-        self._window.after(0, lambda: self._window.set_server_running(True, url))
-        self._log(f"Server running at {url}")
-    
+
+        # Show local URL immediately
+        local_url = f"ws://localhost:{config.server_port}"
+        self._window.after(0, lambda: self._window.set_server_running(True, local_url))
+        self._log(f"Server running at {local_url}")
+
+        # Start tunnel in background if enabled
+        if config.tunnel_enabled:
+            import threading
+            threading.Thread(target=self._start_tunnel_async, daemon=True).start()
+
+    def _start_tunnel_async(self):
+        """Start tunnel in background and update UI when ready"""
+        import time
+        self._log("[TUNNEL] Establishing public tunnel...")
+        self._tunnel = TunnelManager(
+            local_port=config.server_port,
+            on_status=self._log
+        )
+
+        # Start tunnel (non-blocking)
+        self._tunnel.start()
+
+        # Poll for tunnel info
+        for _ in range(60):  # Wait up to 30 seconds
+            if not self._server:  # Server stopped
+                return
+            tunnel_info = self._tunnel.info
+            if tunnel_info and "trycloudflare.com" in tunnel_info.public_url:
+                # Update UI with tunnel URL
+                url = tunnel_info.public_url
+                self._window.after(0, lambda u=url: self._window.set_server_running(True, u))
+                self._log(f"✓ Public URL: {url}")
+                return
+            time.sleep(0.5)
+
+        self._log("[TUNNEL] Tunnel not ready, using local address only")
+
     def _stop_server(self):
         """Stop server mode"""
         if self._server:
@@ -108,9 +130,12 @@ class ClipboardSyncApp:
         """Connect to remote server"""
         if self._client:
             return
-        
+
         self._log(f"Connecting to {url}...")
-        
+
+        # Show connecting state
+        self._window.after(0, lambda: self._window.set_client_connecting())
+
         self._client = ClipboardClient(
             server_url=url,
             on_log=self._log,
@@ -118,7 +143,7 @@ class ClipboardSyncApp:
             on_connected=self._on_client_connection_change
         )
         self._client.start()
-        
+
         # Start clipboard monitor
         self._monitor.start()
     
@@ -139,18 +164,23 @@ class ClipboardSyncApp:
         if config.history_enabled:
             self._history.add(item)
             self._refresh_history()
-        
+
         # Send to server/clients
         if self._server:
             self._server.send_clipboard(item.content)
+            self._window.after(0, lambda: self._window.show_sync_activity())
         elif self._client and self._client.is_connected:
             self._client.send_clipboard(item.content)
-    
+            self._window.after(0, lambda: self._window.show_sync_activity())
+
     def _on_remote_clipboard(self, item: ClipboardItem):
         """Handle remote clipboard received"""
         # Update local clipboard
         self._monitor.set_content(item.content)
-        
+
+        # Show sync activity
+        self._window.after(0, lambda: self._window.show_sync_activity())
+
         # Add to history
         if config.history_enabled:
             self._history.add(item)
