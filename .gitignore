@@ -6,6 +6,13 @@ venv/
 env/
 ENV/
 
+# Nuitka build outputs
+nuitka_dist_fast/
+nuitka_dist/
+*.onefile-build/
+nuitka-crash-report.xml
+build_log.txt
+
 # Python cache
 __pycache__/
 *.py[cod]

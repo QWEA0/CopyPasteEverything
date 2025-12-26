@@ -1,0 +1,4 @@
+# Build dependencies for CopyPasteEverything
+# Nuitka - compiles Python to C for faster startup and execution
+nuitka>=2.0.0
+ordered-set>=4.1.0

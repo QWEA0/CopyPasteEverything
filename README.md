@@ -100,10 +100,32 @@ Configuration is stored in `%APPDATA%/CopyPasteEverything/config.json`:
 | `max_history_items` | 100 | Max history entries |
 | `encryption_enabled` | true | Enable encryption |
 
+## 📦 Building Executable
+
+Build standalone executable using Nuitka (compiles Python to C):
+
+```bash
+# Install build dependencies
+pip install -r requirements-build.txt
+
+# Option 1: Single-file executable (portable, slower startup)
+python build_nuitka.py
+
+# Option 2: Standalone folder (faster startup, recommended)
+python build_nuitka_fast.py
+
+# Or use the batch file
+build_nuitka.bat
+```
+
+**Build outputs:**
+- Single-file: `nuitka_dist/CopyPasteEverything.exe` (~23 MB)
+- Standalone: `nuitka_dist_fast/main.dist/CopyPasteEverything.exe` (instant startup)
+
 ## 🔧 Requirements
 
 - Windows 10/11
-- Python 3.10+
+- Python 3.11+ (for development)
 - Dependencies (auto-installed):
   - customtkinter
   - websockets
