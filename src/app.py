@@ -159,24 +159,37 @@ class ClipboardSyncApp:
         self._log("Disconnected")
     
     def _on_local_clipboard_change(self, item: ClipboardItem):
-        """Handle local clipboard change"""
+        """Handle local clipboard change (supports text, image, files)"""
         # Add to history
         if config.history_enabled:
             self._history.add(item)
             self._refresh_history()
 
-        # Send to server/clients
+        # Send to server/clients using new item-based methods
         if self._server:
-            self._server.send_clipboard(item.content)
+            self._server.send_clipboard_item(item)
             self._window.after(0, lambda: self._window.show_sync_activity())
         elif self._client and self._client.is_connected:
-            self._client.send_clipboard(item.content)
+            self._client.send_clipboard_item(item)
             self._window.after(0, lambda: self._window.show_sync_activity())
 
     def _on_remote_clipboard(self, item: ClipboardItem):
-        """Handle remote clipboard received"""
-        # Update local clipboard
-        self._monitor.set_content(item.content)
+        """Handle remote clipboard received (supports text, image, files)"""
+        from .clipboard_monitor import ContentType
+
+        # Log what we received
+        if item.content_type == ContentType.FILES:
+            self._log(f"Received files: {item.file_paths}")
+        elif item.content_type == ContentType.IMAGE:
+            self._log(f"Received image: {len(item.image_data)} bytes")
+
+        # Update local clipboard using new set_item method
+        try:
+            self._log(f"Setting clipboard for type: {item.content_type.value}")
+            self._monitor.set_item(item)
+            self._log("Clipboard set successfully")
+        except Exception as e:
+            self._log(f"Failed to set clipboard: {e}")
 
         # Show sync activity
         self._window.after(0, lambda: self._window.show_sync_activity())

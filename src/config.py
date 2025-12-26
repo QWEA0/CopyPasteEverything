@@ -33,6 +33,10 @@ class Config:
     auto_sync: bool = True
     sync_interval_ms: int = 500
     max_content_size: int = 10 * 1024 * 1024  # 10MB
+
+    # File transfer settings
+    max_file_size: int = 50 * 1024 * 1024  # 50MB per file
+    max_total_file_size: int = 100 * 1024 * 1024  # 100MB total per transfer
     
     # History settings
     history_enabled: bool = True
