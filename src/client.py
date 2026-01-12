@@ -247,19 +247,30 @@ class ClipboardClient:
 
     async def _handle_chunked_init(self, data: Dict[str, Any]):
         """Handle incoming chunked transfer initialization"""
-        transfer_id = data['transfer_id']
-        filename = data['filename']
-        file_size = data['file_size']
+        try:
+            transfer_id = data['transfer_id']
+            filename = data['filename']
+            file_size = data['file_size']
 
-        self._pending_transfers[transfer_id] = filename
-        self._log(f"Incoming chunked transfer: {filename} ({file_size / 1024 / 1024:.2f}MB)")
+            self._pending_transfers[transfer_id] = filename
+            self._log(f"Incoming chunked transfer: {filename} ({file_size / 1024 / 1024:.2f}MB)")
 
-        # Acknowledge and request chunks (or specify which chunks we need for resume)
-        response = self._transfer_manager.handle_transfer_init(data)
-        needed_chunks = response.get('needed_chunks', [])
-        self._log(f"Sending ACK for {filename}, requesting {len(needed_chunks)} chunks")
-        await self._websocket.send(json.dumps(response))
-        self._log(f"ACK sent for transfer {transfer_id[:8]}")
+            # Acknowledge and request chunks (or specify which chunks we need for resume)
+            self._log(f"Processing transfer init...")
+            response = self._transfer_manager.handle_transfer_init(data)
+            needed_chunks = response.get('needed_chunks', [])
+            self._log(f"Sending ACK for {filename}, requesting {len(needed_chunks)} chunks")
+
+            # Serialize and send the ACK
+            ack_json = json.dumps(response)
+            self._log(f"ACK message size: {len(ack_json)} bytes")
+            await self._websocket.send(ack_json)
+            self._log(f"ACK sent for transfer {transfer_id[:8]}")
+        except Exception as e:
+            import traceback
+            self._log(f"Error in _handle_chunked_init: {e}")
+            self._log(f"Traceback: {traceback.format_exc()}")
+            raise
 
     async def _handle_chunked_ack(self, data: Dict[str, Any]):
         """Handle acknowledgment of our transfer init - start sending chunks"""

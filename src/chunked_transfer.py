@@ -431,51 +431,67 @@ class ChunkedTransferManager:
         Returns response with list of needed chunks (for resume support).
         """
         transfer_id = data['transfer_id']
+        self._log(f"Processing transfer init: {transfer_id[:8]}")
 
-        with self._lock:
-            # Check if we have a paused transfer for this file
-            existing = self._incoming.get(transfer_id)
-            if existing and existing.file_hash == data['file_hash']:
-                # Resume existing transfer
-                needed_chunks = [c.chunk_index for c in existing.get_pending_chunks()]
-                existing.state = TransferState.TRANSFERRING
-                self._log(f"Resuming transfer: {existing.filename} ({existing.progress:.1f}% done)")
-            else:
-                # New transfer
-                chunks = [
-                    ChunkInfo(
-                        chunk_index=c['chunk_index'],
-                        offset=c['offset'],
-                        size=c['size'],
-                        checksum=c['checksum']
+        try:
+            with self._lock:
+                # Check if we have a paused transfer for this file
+                existing = self._incoming.get(transfer_id)
+                if existing and existing.file_hash == data['file_hash']:
+                    # Resume existing transfer
+                    needed_chunks = [c.chunk_index for c in existing.get_pending_chunks()]
+                    existing.state = TransferState.TRANSFERRING
+                    self._log(f"Resuming transfer: {existing.filename} ({existing.progress:.1f}% done)")
+                else:
+                    # New transfer
+                    self._log(f"Creating new transfer task...")
+                    chunks = [
+                        ChunkInfo(
+                            chunk_index=c['chunk_index'],
+                            offset=c['offset'],
+                            size=c['size'],
+                            checksum=c['checksum']
+                        )
+                        for c in data['chunks']
+                    ]
+                    task = TransferTask(
+                        transfer_id=transfer_id,
+                        filename=data['filename'],
+                        file_size=data['file_size'],
+                        file_hash=data['file_hash'],
+                        total_chunks=data['total_chunks'],
+                        chunk_size=data['chunk_size'],
+                        chunks=chunks,
+                        state=TransferState.TRANSFERRING
                     )
-                    for c in data['chunks']
-                ]
-                task = TransferTask(
-                    transfer_id=transfer_id,
-                    filename=data['filename'],
-                    file_size=data['file_size'],
-                    file_hash=data['file_hash'],
-                    total_chunks=data['total_chunks'],
-                    chunk_size=data['chunk_size'],
-                    chunks=chunks,
-                    state=TransferState.TRANSFERRING
-                )
-                self._incoming[transfer_id] = task
-                self._incoming_data[transfer_id] = bytearray(data['file_size'])
-                needed_chunks = list(range(data['total_chunks']))
-                self._log(f"Starting chunked receive: {data['filename']} ({data['file_size'] / 1024 / 1024:.2f}MB)")
+                    self._incoming[transfer_id] = task
 
-                # Trigger initial progress callback to show UI
-                self.on_progress(transfer_id, 0)
+                    # Allocate buffer for file data
+                    file_size = data['file_size']
+                    self._log(f"Allocating {file_size / 1024 / 1024:.2f}MB buffer...")
+                    self._incoming_data[transfer_id] = bytearray(file_size)
+                    self._log(f"Buffer allocated successfully")
 
-        self._save_state()
+                    needed_chunks = list(range(data['total_chunks']))
+                    self._log(f"Starting chunked receive: {data['filename']} ({file_size / 1024 / 1024:.2f}MB)")
 
-        return {
-            'type': 'chunked_transfer_ack',
-            'transfer_id': transfer_id,
-            'needed_chunks': needed_chunks
-        }
+                    # Trigger initial progress callback to show UI
+                    self.on_progress(transfer_id, 0)
+
+            self._log(f"Saving transfer state...")
+            self._save_state()
+            self._log(f"Transfer init complete, returning ACK with {len(needed_chunks)} chunks")
+
+            return {
+                'type': 'chunked_transfer_ack',
+                'transfer_id': transfer_id,
+                'needed_chunks': needed_chunks
+            }
+        except Exception as e:
+            self._log(f"Error in handle_transfer_init: {e}")
+            import traceback
+            self._log(f"Traceback: {traceback.format_exc()}")
+            raise
 
     def handle_chunk_data(self, data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         """
