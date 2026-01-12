@@ -472,10 +472,13 @@ class ClipboardMonitor:
 
                 # data is a tuple of file paths
                 if isinstance(data, tuple):
-                    return list(data)
+                    file_list = list(data)
+                    print(f"[ClipboardMonitor] Got clipboard files: {file_list}")
+                    return file_list
 
             win32clipboard.CloseClipboard()
-        except Exception:
+        except Exception as e:
+            print(f"[ClipboardMonitor] Error getting clipboard files: {e}")
             try:
                 win32clipboard.CloseClipboard()
             except Exception:
@@ -530,10 +533,18 @@ class ClipboardMonitor:
                             item = ClipboardItem.from_text(content, "local")
 
                 if item:
+                    # Log what we're sending
+                    if item.content_type == ContentType.FILES:
+                        print(f"[ClipboardMonitor] Detected files: {len(item.file_paths)} paths, {len(item.file_contents)} contents")
+                        if item.file_contents:
+                            for fc in item.file_contents:
+                                print(f"[ClipboardMonitor]   - {fc.filename}: {len(fc.content)} bytes")
                     self.on_change(item)
 
-            except Exception:
-                pass  # Silently handle clipboard access errors
+            except Exception as e:
+                import traceback
+                print(f"[ClipboardMonitor] Error in monitor loop: {e}")
+                print(f"[ClipboardMonitor] Traceback: {traceback.format_exc()}")
 
             time.sleep(self.interval)
 

@@ -438,11 +438,17 @@ class ClipboardClient:
 
     def send_clipboard_item(self, item: ClipboardItem):
         """Thread-safe method to send clipboard item"""
+        self._log(f"send_clipboard_item called: type={item.content_type.value}, connected={self._connected}")
+        if item.content_type == ContentType.FILES:
+            self._log(f"  file_paths={len(item.file_paths)}, file_contents={len(item.file_contents)}")
         if self._loop and self._connected:
+            self._log("Scheduling send to event loop...")
             asyncio.run_coroutine_threadsafe(
                 self._send_clipboard_item(item),
                 self._loop
             )
+        else:
+            self._log(f"Cannot send: loop={self._loop is not None}, connected={self._connected}")
 
     def send_clipboard(self, content: str):
         """Thread-safe method to send text clipboard (legacy compatibility)"""
