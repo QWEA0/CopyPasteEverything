@@ -9,7 +9,7 @@ from typing import Callable, Optional
 import pyperclip
 
 from .theme import theme
-from .components import TerminalLog, StatusIndicator, GlowButton, ClipboardCard, TransferPanel
+from .components import TerminalLog, StatusIndicator, GlowButton, ClipboardCard, TransferProgressBar
 
 
 class MainWindow(ctk.CTk):
@@ -88,12 +88,8 @@ class MainWindow(ctk.CTk):
         self._client_status.pack(side="left")
 
     def _create_transfer_panel(self):
-        """Create transfer progress panel (hidden by default)"""
-        self._transfer_panel = TransferPanel(
-            self,
-            on_cancel=self._on_cancel_transfer
-        )
-        # Panel will show itself when transfers are added
+        """Create transfer tab - will be called after tabs are created"""
+        pass  # Handled in _create_transfer_tab
 
     def _create_tabs(self):
         """Create tabbed interface"""
@@ -109,15 +105,17 @@ class MainWindow(ctk.CTk):
             corner_radius=theme.corner_radius
         )
         self._tabview.pack(fill="both", expand=True, padx=10, pady=10)
-        
+
         # Create tabs
         self._tabview.add("  SERVER  ")
         self._tabview.add("  CLIENT  ")
+        self._tabview.add("  TRANSFERS  ")
         self._tabview.add("  HISTORY  ")
         self._tabview.add("  LOGS  ")
-        
+
         self._create_server_tab()
         self._create_client_tab()
+        self._create_transfer_tab()
         self._create_history_tab()
         self._create_logs_tab()
     
@@ -286,6 +284,49 @@ class MainWindow(ctk.CTk):
             command=self._toggle_client
         )
         self._connect_btn.pack(side="left", padx=5)
+
+    def _create_transfer_tab(self):
+        """Create file transfer tab"""
+        tab = self._tabview.tab("  TRANSFERS  ")
+
+        # Header
+        header = ctk.CTkFrame(tab, fg_color="transparent")
+        header.pack(fill="x", padx=10, pady=10)
+
+        ctk.CTkLabel(
+            header,
+            text="// FILE TRANSFERS",
+            font=(theme.font_mono, theme.font_size_large, "bold"),
+            text_color=theme.accent_cyan
+        ).pack(side="left")
+
+        self._transfer_count_label = ctk.CTkLabel(
+            header,
+            text="",
+            font=(theme.font_mono, theme.font_size_small),
+            text_color=theme.text_muted
+        )
+        self._transfer_count_label.pack(side="right")
+
+        # Empty state message
+        self._transfer_empty_label = ctk.CTkLabel(
+            tab,
+            text="No active transfers\n\nFile transfers will appear here when\nyou copy large files between devices",
+            font=(theme.font_mono, theme.font_size_normal),
+            text_color=theme.text_muted,
+            justify="center"
+        )
+        self._transfer_empty_label.pack(expand=True)
+
+        # Scrollable transfer list (hidden initially)
+        self._transfer_list = ctk.CTkScrollableFrame(
+            tab,
+            fg_color=theme.bg_dark,
+            corner_radius=theme.corner_radius
+        )
+
+        # Transfer progress bars storage
+        self._transfer_bars: dict = {}  # transfer_id -> TransferProgressBar
 
     def _create_history_tab(self):
         """Create history tab"""
@@ -490,18 +531,56 @@ class MainWindow(ctk.CTk):
 
     # === Transfer progress methods ===
 
+    def _update_transfer_ui(self):
+        """Update transfer list visibility and count"""
+        count = len(self._transfer_bars)
+        if count > 0:
+            self._transfer_empty_label.pack_forget()
+            self._transfer_list.pack(fill="both", expand=True, padx=10, pady=5)
+            self._transfer_count_label.configure(text=f"({count} active)")
+        else:
+            self._transfer_list.pack_forget()
+            self._transfer_empty_label.pack(expand=True)
+            self._transfer_count_label.configure(text="")
+
     def add_transfer(self, transfer_id: str, filename: str, direction: str = "upload"):
-        """Add a new transfer to the progress panel"""
-        self._transfer_panel.add_transfer(transfer_id, filename, direction)
+        """Add a new transfer to the progress tab"""
+        if transfer_id in self._transfer_bars:
+            return
+
+        progress_bar = TransferProgressBar(
+            self._transfer_list,
+            transfer_id=transfer_id,
+            filename=filename,
+            on_cancel=self._on_cancel_transfer
+        )
+        progress_bar.pack(fill="x", pady=2)
+
+        self._transfer_bars[transfer_id] = progress_bar
+        self._update_transfer_ui()
 
     def update_transfer_progress(self, transfer_id: str, progress: float):
         """Update progress for a transfer (0-100)"""
-        self._transfer_panel.update_progress(transfer_id, progress)
+        if transfer_id in self._transfer_bars:
+            self._transfer_bars[transfer_id].set_progress(progress)
 
     def complete_transfer(self, transfer_id: str):
-        """Mark a transfer as complete"""
-        self._transfer_panel.complete_transfer(transfer_id)
+        """Mark a transfer as complete and remove after delay"""
+        if transfer_id in self._transfer_bars:
+            self._transfer_bars[transfer_id].set_complete()
+            # Remove after 2 seconds
+            self.after(2000, lambda: self._remove_transfer(transfer_id))
 
     def fail_transfer(self, transfer_id: str, error: str = "Failed"):
         """Mark a transfer as failed"""
-        self._transfer_panel.fail_transfer(transfer_id, error)
+        if transfer_id in self._transfer_bars:
+            self._transfer_bars[transfer_id].set_error(error)
+            # Remove after 3 seconds
+            self.after(3000, lambda: self._remove_transfer(transfer_id))
+
+    def _remove_transfer(self, transfer_id: str):
+        """Remove a transfer from the list"""
+        if transfer_id in self._transfer_bars:
+            self._transfer_bars[transfer_id].destroy()
+            del self._transfer_bars[transfer_id]
+            self._update_transfer_ui()

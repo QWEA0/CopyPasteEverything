@@ -26,9 +26,9 @@ class GeekTheme:
     accent_red: str = "#ff0050"        # Error red
     
     # Text colors
-    text_primary: str = "#e6edf3"      # Primary text
-    text_secondary: str = "#8b949e"    # Secondary text
-    text_muted: str = "#484f58"        # Muted text
+    text_primary: str = "#c4e3ff"      # Primary text
+    text_secondary: str = "#ffffff"    # Secondary text
+    text_muted: str = "#cdcdcd"        # Muted text
     
     # Border colors
     border_default: str = "#30363d"

@@ -38,6 +38,7 @@ class ChunkInfo:
     size: int
     checksum: str
     transferred: bool = False
+    received: bool = False  # For sender: whether receiver has acknowledged this chunk
 
 
 @dataclass
@@ -297,6 +298,10 @@ class ChunkedTransferManager:
                 partial_file.unlink()
             except Exception:
                 pass
+
+    def cleanup_transfer(self, transfer_id: str):
+        """Public method to clean up a transfer"""
+        self._cleanup_transfer(transfer_id)
 
         self._save_state()
 

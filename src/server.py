@@ -195,38 +195,73 @@ class ClipboardServer:
                 await self._broadcast(data, exclude=websocket)
 
             elif msg_type == 'chunked_transfer_ack':
-                # Relay acknowledgment back to sender
+                # Handle acknowledgment - either relay to sender or handle server-initiated
                 transfer_id = data['transfer_id']
                 info = self._chunked_transfers.get(transfer_id)
-                if info and info[0] != websocket:
-                    try:
-                        await info[0].send(message)
-                    except Exception:
-                        pass
+                if info:
+                    if info[0] is None:
+                        # Server-initiated transfer - handle locally
+                        await self._handle_server_chunked_ack(data, websocket)
+                    elif info[0] != websocket:
+                        # Relay to original sender
+                        try:
+                            await info[0].send(message)
+                        except Exception:
+                            pass
 
             elif msg_type == 'chunk_data':
                 # Relay chunk data to other clients
                 await self._broadcast(data, exclude=websocket)
 
             elif msg_type == 'chunk_ack':
-                # Relay chunk acknowledgment back to sender
+                # Handle chunk acknowledgment
                 transfer_id = data['transfer_id']
                 info = self._chunked_transfers.get(transfer_id)
-                if info and info[0] != websocket:
-                    try:
-                        await info[0].send(message)
-                    except Exception:
-                        pass
+                if info:
+                    if info[0] is None:
+                        # Server-initiated transfer - update progress based on acks
+                        chunk_index = data.get('chunk_index', 0)
+                        task = self._transfer_manager._outgoing.get(transfer_id)
+                        if task:
+                            # Mark chunk as received and update progress
+                            if chunk_index < len(task.chunks):
+                                task.chunks[chunk_index].received = True
+                            received = sum(1 for c in task.chunks if c.received)
+                            # Progress: 50-100% for receiving acknowledgments
+                            progress = 50 + (received / task.total_chunks) * 50
+                            self._on_transfer_progress(transfer_id, progress)
+
+                            if received >= task.total_chunks:
+                                # All chunks received, cleanup
+                                self._transfer_manager.cleanup_transfer(transfer_id)
+                                self._chunked_transfers.pop(transfer_id, None)
+                                self._log(f"Chunked transfer complete: {info[1]}")
+                    elif info[0] != websocket:
+                        # Relay to original sender
+                        try:
+                            await info[0].send(message)
+                        except Exception:
+                            pass
 
             elif msg_type == 'chunk_nack':
                 # Relay negative acknowledgment back to sender
                 transfer_id = data['transfer_id']
                 info = self._chunked_transfers.get(transfer_id)
-                if info and info[0] != websocket:
-                    try:
-                        await info[0].send(message)
-                    except Exception:
-                        pass
+                if info:
+                    if info[0] is None:
+                        # Server-initiated transfer - resend chunk
+                        chunk_index = data.get('chunk_index', 0)
+                        chunk_data = self._transfer_manager.get_chunk_data(transfer_id, chunk_index)
+                        if chunk_data:
+                            try:
+                                await websocket.send(json.dumps(chunk_data))
+                            except Exception as e:
+                                self._log(f"Failed to resend chunk {chunk_index}: {e}")
+                    elif info[0] != websocket:
+                        try:
+                            await info[0].send(message)
+                        except Exception:
+                            pass
 
             elif msg_type == 'transfer_complete':
                 # Cleanup and relay completion
@@ -345,19 +380,28 @@ class ClipboardServer:
         transfer_id = data['transfer_id']
         needed_chunks = data.get('needed_chunks', [])
 
-        self._log(f"Client requested {len(needed_chunks)} chunks for {transfer_id}")
+        info = self._chunked_transfers.get(transfer_id)
+        filename = info[1] if info else transfer_id[:8]
+
+        self._log(f"Client requested {len(needed_chunks)} chunks for {filename}")
 
         # Send all needed chunks to the requesting client
-        for chunk_index in needed_chunks:
+        total_chunks = len(needed_chunks)
+        for idx, chunk_index in enumerate(needed_chunks):
             chunk_data = self._transfer_manager.get_chunk_data(transfer_id, chunk_index)
             if chunk_data:
                 try:
                     await websocket.send(json.dumps(chunk_data))
+                    # Update sending progress
+                    send_progress = ((idx + 1) / total_chunks) * 50  # 0-50% for sending
+                    self._on_transfer_progress(transfer_id, send_progress)
                 except Exception as e:
                     self._log(f"Failed to send chunk {chunk_index}: {e}")
                     break
                 # Small delay to prevent overwhelming
                 await asyncio.sleep(0.01)
+
+        self._log(f"Sent {total_chunks} chunks for {filename}, waiting for acknowledgments")
 
     async def broadcast_clipboard(self, content: str):
         """Legacy method for backward compatibility - broadcasts text content"""
@@ -379,12 +423,15 @@ class ClipboardServer:
     
     async def _run_server(self):
         """Run the WebSocket server"""
+        # max_size: Set to 10MB to accommodate large chunks (1MB chunk + compression overhead + base64 encoding)
+        # Default websockets max_size is 1MB which causes disconnection during chunked transfer
         self._server = await websockets.serve(
             self._handler,
             "0.0.0.0",
             self.port,
             ping_interval=30,
-            ping_timeout=10
+            ping_timeout=10,
+            max_size=10 * 1024 * 1024  # 10MB to handle chunked transfer messages
         )
         self._log(f"Server started on port {self.port}")
         await self._server.wait_closed()
