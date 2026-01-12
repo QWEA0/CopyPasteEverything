@@ -346,6 +346,10 @@ class ChunkedTransferManager:
             self._outgoing_data[transfer_id] = data
 
         self._log(f"Prepared chunked transfer: {filename} ({len(data) / 1024 / 1024:.2f}MB, {len(chunks)} chunks)")
+
+        # Trigger initial progress callback to show UI
+        self.on_progress(transfer_id, 0)
+
         return task
 
     def get_chunk_data(self, transfer_id: str, chunk_index: int) -> Optional[Dict[str, Any]]:
@@ -456,6 +460,9 @@ class ChunkedTransferManager:
                 self._incoming_data[transfer_id] = bytearray(data['file_size'])
                 needed_chunks = list(range(data['total_chunks']))
                 self._log(f"Starting chunked receive: {data['filename']} ({data['file_size'] / 1024 / 1024:.2f}MB)")
+
+                # Trigger initial progress callback to show UI
+                self.on_progress(transfer_id, 0)
 
         self._save_state()
 

@@ -38,8 +38,12 @@ class ClipboardSyncApp:
             on_disconnect=self._disconnect,
             on_copy_item=self._copy_from_history,
             on_delete_item=self._delete_history_item,
-            on_clear_history=self._clear_history
+            on_clear_history=self._clear_history,
+            on_cancel_transfer=self._cancel_transfer
         )
+
+        # Track active transfers for UI updates
+        self._active_transfers: dict = {}  # transfer_id -> filename
         
         # Initialize clipboard monitor
         self._monitor = ClipboardMonitor(
@@ -67,7 +71,8 @@ class ClipboardSyncApp:
             port=config.server_port,
             on_log=self._log,
             on_client_change=self._on_client_count_change,
-            on_clipboard_received=self._on_remote_clipboard
+            on_clipboard_received=self._on_remote_clipboard,
+            on_transfer_progress=self._on_transfer_progress
         )
         self._server.start()
 
@@ -146,7 +151,8 @@ class ClipboardSyncApp:
             on_log=self._log,
             on_clipboard_received=self._on_remote_clipboard,
             on_connected=self._on_client_connection_change,
-            on_reconnecting=self._on_client_reconnecting
+            on_reconnecting=self._on_client_reconnecting,
+            on_transfer_progress=self._on_transfer_progress
         )
         self._client.start()
 
@@ -221,6 +227,45 @@ class ClipboardSyncApp:
     def _on_client_reconnecting(self):
         """Handle client reconnecting state"""
         self._window.after(0, lambda: self._window.set_client_reconnecting())
+
+    def _on_transfer_progress(self, transfer_id: str, progress: float):
+        """Handle transfer progress update"""
+        # Add transfer to UI if not exists
+        if transfer_id not in self._active_transfers:
+            # Get filename from server or client transfer manager
+            filename = "File transfer"
+            if self._server and hasattr(self._server, '_transfer_manager'):
+                status = self._server._transfer_manager.get_transfer_status(transfer_id)
+                if status:
+                    filename = status.get('filename', 'File transfer')
+            elif self._client and hasattr(self._client, '_transfer_manager'):
+                status = self._client._transfer_manager.get_transfer_status(transfer_id)
+                if status:
+                    filename = status.get('filename', 'File transfer')
+
+            self._active_transfers[transfer_id] = filename
+            self._window.after(0, lambda: self._window.add_transfer(transfer_id, filename))
+
+        # Update progress
+        self._window.after(0, lambda: self._window.update_transfer_progress(transfer_id, progress))
+
+        # Check if complete
+        if progress >= 100:
+            self._active_transfers.pop(transfer_id, None)
+            self._window.after(0, lambda: self._window.complete_transfer(transfer_id))
+
+    def _cancel_transfer(self, transfer_id: str):
+        """Cancel a file transfer"""
+        cancelled = False
+        if self._server and hasattr(self._server, '_transfer_manager'):
+            cancelled = self._server._transfer_manager.cancel_transfer(transfer_id)
+        elif self._client and hasattr(self._client, '_transfer_manager'):
+            cancelled = self._client._transfer_manager.cancel_transfer(transfer_id)
+
+        if cancelled:
+            self._active_transfers.pop(transfer_id, None)
+            self._window.after(0, lambda: self._window.fail_transfer(transfer_id, "Cancelled"))
+            self._log(f"Transfer cancelled: {transfer_id[:8]}...")
 
     def _copy_from_history(self, content: str):
         """Copy item from history to clipboard"""

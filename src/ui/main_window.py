@@ -9,7 +9,7 @@ from typing import Callable, Optional
 import pyperclip
 
 from .theme import theme
-from .components import TerminalLog, StatusIndicator, GlowButton, ClipboardCard
+from .components import TerminalLog, StatusIndicator, GlowButton, ClipboardCard, TransferPanel
 
 
 class MainWindow(ctk.CTk):
@@ -23,10 +23,11 @@ class MainWindow(ctk.CTk):
         on_disconnect: Callable[[], None] = None,
         on_copy_item: Callable[[str], None] = None,
         on_delete_item: Callable[[str], None] = None,
-        on_clear_history: Callable[[], None] = None
+        on_clear_history: Callable[[], None] = None,
+        on_cancel_transfer: Callable[[str], None] = None
     ):
         super().__init__()
-        
+
         # Callbacks
         self._on_start_server = on_start_server or (lambda: None)
         self._on_stop_server = on_stop_server or (lambda: None)
@@ -35,22 +36,24 @@ class MainWindow(ctk.CTk):
         self._on_copy_item = on_copy_item or (lambda x: None)
         self._on_delete_item = on_delete_item or (lambda x: None)
         self._on_clear_history = on_clear_history or (lambda: None)
-        
+        self._on_cancel_transfer = on_cancel_transfer or (lambda x: None)
+
         # Window setup
         self.title("CopyPasteEverything")
         self.geometry("700x550")
         self.minsize(600, 450)
-        
+
         # Configure appearance
         ctk.set_appearance_mode("dark")
         ctk.set_default_color_theme("dark-blue")
         self.configure(fg_color=theme.bg_dark)
-        
+
         # Build UI
         self._create_header()
+        self._create_transfer_panel()  # Add transfer panel
         self._create_tabs()
         self._create_footer()
-        
+
         # State
         self._server_running = False
         self._client_connected = False
@@ -83,7 +86,15 @@ class MainWindow(ctk.CTk):
 
         self._client_status = StatusIndicator(status_frame, "Client: OFF")
         self._client_status.pack(side="left")
-    
+
+    def _create_transfer_panel(self):
+        """Create transfer progress panel (hidden by default)"""
+        self._transfer_panel = TransferPanel(
+            self,
+            on_cancel=self._on_cancel_transfer
+        )
+        # Panel will show itself when transfers are added
+
     def _create_tabs(self):
         """Create tabbed interface"""
         self._tabview = ctk.CTkTabview(
@@ -477,3 +488,20 @@ class MainWindow(ctk.CTk):
         """Delete history item"""
         self._on_delete_item(content_hash)
 
+    # === Transfer progress methods ===
+
+    def add_transfer(self, transfer_id: str, filename: str, direction: str = "upload"):
+        """Add a new transfer to the progress panel"""
+        self._transfer_panel.add_transfer(transfer_id, filename, direction)
+
+    def update_transfer_progress(self, transfer_id: str, progress: float):
+        """Update progress for a transfer (0-100)"""
+        self._transfer_panel.update_progress(transfer_id, progress)
+
+    def complete_transfer(self, transfer_id: str):
+        """Mark a transfer as complete"""
+        self._transfer_panel.complete_transfer(transfer_id)
+
+    def fail_transfer(self, transfer_id: str, error: str = "Failed"):
+        """Mark a transfer as failed"""
+        self._transfer_panel.fail_transfer(transfer_id, error)
