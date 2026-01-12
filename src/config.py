@@ -40,7 +40,7 @@ class Config:
 
     # Chunked transfer settings (for large files)
     chunk_threshold: int = 10 * 1024 * 1024  # 10MB - files larger than this use chunked transfer
-    chunk_size: int = 1 * 1024 * 1024  # 1MB per chunk
+    chunk_size: int = 256 * 1024  # 256KB per chunk (smaller for better reliability over tunnels)
     max_concurrent_transfers: int = 3  # Max concurrent file transfers
     transfer_timeout: int = 300  # 5 minutes timeout for each transfer
     resume_enabled: bool = True  # Enable resume for interrupted transfers

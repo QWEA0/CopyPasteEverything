@@ -406,12 +406,48 @@ class ClipboardServer:
             self._log(f"Warning: No chunks requested for {filename}")
             return
 
-        # Send all needed chunks to the requesting client
-        total_chunks = len(needed_chunks)
-        sent_count = 0
+        # Store pending chunks for this transfer - will be sent in batches
+        if not hasattr(self, '_pending_chunks'):
+            self._pending_chunks = {}
+
+        self._pending_chunks[transfer_id] = {
+            'chunks': list(needed_chunks),
+            'current_index': 0,
+            'websocket': websocket,
+            'filename': filename
+        }
+
+        # Start sending first batch of chunks
+        await self._send_chunk_batch(transfer_id)
+
+    async def _send_chunk_batch(self, transfer_id: str, batch_size: int = 3):
+        """Send a batch of chunks with flow control"""
+        if not hasattr(self, '_pending_chunks'):
+            return
+
+        pending = self._pending_chunks.get(transfer_id)
+        if not pending:
+            return
+
+        chunks = pending['chunks']
+        current = pending['current_index']
+        websocket = pending['websocket']
+        filename = pending['filename']
+        total_chunks = len(chunks)
+
+        if current >= total_chunks:
+            # All chunks sent
+            self._pending_chunks.pop(transfer_id, None)
+            self._log(f"All chunks sent for {filename}")
+            return
+
         loop = asyncio.get_event_loop()
 
-        for idx, chunk_index in enumerate(needed_chunks):
+        # Send a batch of chunks
+        end_idx = min(current + batch_size, total_chunks)
+        for idx in range(current, end_idx):
+            chunk_index = chunks[idx]
+
             # Get chunk data in thread pool to avoid blocking event loop
             chunk_data = await loop.run_in_executor(
                 None,
@@ -423,22 +459,28 @@ class ClipboardServer:
                 try:
                     chunk_json = json.dumps(chunk_data)
                     await websocket.send(chunk_json)
-                    sent_count += 1
                     # Update sending progress
                     send_progress = ((idx + 1) / total_chunks) * 50  # 0-50% for sending
                     self._on_transfer_progress(transfer_id, send_progress)
-                    # Log progress every 10 chunks
-                    if (idx + 1) % 10 == 0 or idx == 0:
+                    # Log progress
+                    if (idx + 1) % 5 == 0 or idx == 0:
                         self._log(f"Sent chunk {idx + 1}/{total_chunks} for {filename}")
                 except Exception as e:
                     self._log(f"Failed to send chunk {chunk_index}: {e}")
-                    break
-                # Small delay to prevent overwhelming
-                await asyncio.sleep(0.01)
+                    self._pending_chunks.pop(transfer_id, None)
+                    return
+                # Delay between chunks within batch
+                await asyncio.sleep(0.05)
             else:
                 self._log(f"Warning: Could not get data for chunk {chunk_index}")
 
-        self._log(f"Sent {sent_count}/{total_chunks} chunks for {filename}, waiting for acknowledgments")
+        # Update current index
+        pending['current_index'] = end_idx
+
+        # If more chunks to send, schedule next batch after a delay
+        if end_idx < total_chunks:
+            await asyncio.sleep(0.1)  # Wait before next batch
+            await self._send_chunk_batch(transfer_id)
 
     async def broadcast_clipboard(self, content: str):
         """Legacy method for backward compatibility - broadcasts text content"""
