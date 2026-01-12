@@ -409,8 +409,16 @@ class ClipboardServer:
         # Send all needed chunks to the requesting client
         total_chunks = len(needed_chunks)
         sent_count = 0
+        loop = asyncio.get_event_loop()
+
         for idx, chunk_index in enumerate(needed_chunks):
-            chunk_data = self._transfer_manager.get_chunk_data(transfer_id, chunk_index)
+            # Get chunk data in thread pool to avoid blocking event loop
+            chunk_data = await loop.run_in_executor(
+                None,
+                self._transfer_manager.get_chunk_data,
+                transfer_id,
+                chunk_index
+            )
             if chunk_data:
                 try:
                     chunk_json = json.dumps(chunk_data)

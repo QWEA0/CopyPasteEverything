@@ -432,6 +432,7 @@ class ChunkedTransferManager:
         """
         transfer_id = data['transfer_id']
         self._log(f"Processing transfer init: {transfer_id[:8]}")
+        is_new_transfer = False
 
         try:
             with self._lock:
@@ -444,6 +445,7 @@ class ChunkedTransferManager:
                     self._log(f"Resuming transfer: {existing.filename} ({existing.progress:.1f}% done)")
                 else:
                     # New transfer
+                    is_new_transfer = True
                     self._log(f"Creating new transfer task...")
                     chunks = [
                         ChunkInfo(
@@ -475,8 +477,14 @@ class ChunkedTransferManager:
                     needed_chunks = list(range(data['total_chunks']))
                     self._log(f"Starting chunked receive: {data['filename']} ({file_size / 1024 / 1024:.2f}MB)")
 
-                    # Trigger initial progress callback to show UI
+            # Trigger progress callback OUTSIDE the lock to avoid potential deadlock
+            if is_new_transfer:
+                self._log(f"Triggering initial progress callback...")
+                try:
                     self.on_progress(transfer_id, 0)
+                    self._log(f"Progress callback completed")
+                except Exception as e:
+                    self._log(f"Warning: Progress callback failed: {e}")
 
             self._log(f"Saving transfer state...")
             self._save_state()

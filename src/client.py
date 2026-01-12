@@ -255,9 +255,15 @@ class ClipboardClient:
             self._pending_transfers[transfer_id] = filename
             self._log(f"Incoming chunked transfer: {filename} ({file_size / 1024 / 1024:.2f}MB)")
 
-            # Acknowledge and request chunks (or specify which chunks we need for resume)
-            self._log(f"Processing transfer init...")
-            response = self._transfer_manager.handle_transfer_init(data)
+            # Process transfer init in thread pool to avoid blocking event loop
+            # This is important because allocating large buffers can block
+            self._log(f"Processing transfer init in thread pool...")
+            loop = asyncio.get_event_loop()
+            response = await loop.run_in_executor(
+                None,  # Use default thread pool
+                self._transfer_manager.handle_transfer_init,
+                data
+            )
             needed_chunks = response.get('needed_chunks', [])
             self._log(f"Sending ACK for {filename}, requesting {len(needed_chunks)} chunks")
 
@@ -279,9 +285,17 @@ class ClipboardClient:
 
         self._log(f"Transfer {transfer_id} acknowledged, sending {len(needed_chunks)} chunks")
 
+        loop = asyncio.get_event_loop()
+
         # Send all needed chunks
         for chunk_index in needed_chunks:
-            chunk_data = self._transfer_manager.get_chunk_data(transfer_id, chunk_index)
+            # Get chunk data in thread pool to avoid blocking event loop
+            chunk_data = await loop.run_in_executor(
+                None,
+                self._transfer_manager.get_chunk_data,
+                transfer_id,
+                chunk_index
+            )
             if chunk_data:
                 await self._websocket.send(json.dumps(chunk_data))
                 # Small delay to prevent overwhelming the connection
@@ -292,7 +306,14 @@ class ClipboardClient:
         chunk_index = data.get('chunk_index', 0)
         transfer_id = data.get('transfer_id', '')[:8]
         self._log(f"Received chunk {chunk_index} for transfer {transfer_id}")
-        response = self._transfer_manager.handle_chunk_data(data)
+
+        # Process chunk data in thread pool to avoid blocking event loop
+        loop = asyncio.get_event_loop()
+        response = await loop.run_in_executor(
+            None,
+            self._transfer_manager.handle_chunk_data,
+            data
+        )
         if response:
             response_type = response.get('type', 'unknown')
             self._log(f"Sending {response_type} for chunk {chunk_index}")
