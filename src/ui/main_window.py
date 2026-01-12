@@ -102,22 +102,48 @@ class MainWindow(ctk.CTk):
             segmented_button_unselected_color=theme.bg_light,
             segmented_button_unselected_hover_color=theme.bg_hover,
             text_color=theme.text_secondary,
-            corner_radius=theme.corner_radius
+            text_color_disabled=theme.text_muted,
+            corner_radius=theme.corner_radius,
+            command=self._on_tab_changed
         )
         self._tabview.pack(fill="both", expand=True, padx=10, pady=10)
 
+        # Tab names
+        self._tab_names = ["  SERVER  ", "  CLIENT  ", "  TRANSFERS  ", "  HISTORY  ", "  LOGS  "]
+
         # Create tabs
-        self._tabview.add("  SERVER  ")
-        self._tabview.add("  CLIENT  ")
-        self._tabview.add("  TRANSFERS  ")
-        self._tabview.add("  HISTORY  ")
-        self._tabview.add("  LOGS  ")
+        for name in self._tab_names:
+            self._tabview.add(name)
+
+        # Apply initial tab text colors (selected=black, unselected=white)
+        self._update_tab_text_colors()
 
         self._create_server_tab()
         self._create_client_tab()
         self._create_transfer_tab()
         self._create_history_tab()
         self._create_logs_tab()
+
+    def _on_tab_changed(self):
+        """Handle tab change event to update text colors"""
+        self._update_tab_text_colors()
+
+    def _update_tab_text_colors(self):
+        """Update tab text colors: black for selected, white for unselected"""
+        try:
+            current_tab = self._tabview.get()
+            segmented_button = self._tabview._segmented_button
+
+            # Iterate through all buttons in the segmented button
+            for button_name, button in segmented_button._buttons_dict.items():
+                if button_name == current_tab:
+                    # Selected tab: black text for contrast on green background
+                    button.configure(text_color="#000000")
+                else:
+                    # Unselected tab: white text for visibility on dark background
+                    button.configure(text_color=theme.text_secondary)
+        except Exception:
+            pass  # Silently ignore if internal structure changes
     
     def _create_server_tab(self):
         """Create server control tab"""
