@@ -130,10 +130,12 @@ class ClipboardClient:
                     async for message in websocket:
                         await self._handle_message(message)
             
-            except websockets.exceptions.ConnectionClosed:
-                self._log("Connection closed")
+            except websockets.exceptions.ConnectionClosed as e:
+                self._log(f"Connection closed: {e.code} {e.reason}")
             except Exception as e:
+                import traceback
                 self._log(f"Connection error: {e}")
+                self._log(f"Traceback: {traceback.format_exc()}")
             
             self._connected = False
             self._websocket = None
@@ -150,6 +152,10 @@ class ClipboardClient:
         try:
             data = json.loads(message)
             msg_type = data.get('type')
+
+            # Log message type for debugging (except frequent messages)
+            if msg_type not in ('pong', 'chunk_data'):
+                self._log(f"Received message type: {msg_type}")
 
             if msg_type == 'clipboard':
                 content_type = ContentType(data.get('content_type', 'text'))
@@ -232,10 +238,12 @@ class ClipboardClient:
                 # Transfer finished
                 self._log(f"Transfer {data.get('transfer_id')} confirmed complete")
 
-        except json.JSONDecodeError:
-            self._log("Invalid JSON received")
+        except json.JSONDecodeError as e:
+            self._log(f"Invalid JSON received: {e}")
         except Exception as e:
+            import traceback
             self._log(f"Message handling error: {e}")
+            self._log(f"Traceback: {traceback.format_exc()}")
 
     async def _handle_chunked_init(self, data: Dict[str, Any]):
         """Handle incoming chunked transfer initialization"""
@@ -248,7 +256,10 @@ class ClipboardClient:
 
         # Acknowledge and request chunks (or specify which chunks we need for resume)
         response = self._transfer_manager.handle_transfer_init(data)
+        needed_chunks = response.get('needed_chunks', [])
+        self._log(f"Sending ACK for {filename}, requesting {len(needed_chunks)} chunks")
         await self._websocket.send(json.dumps(response))
+        self._log(f"ACK sent for transfer {transfer_id[:8]}")
 
     async def _handle_chunked_ack(self, data: Dict[str, Any]):
         """Handle acknowledgment of our transfer init - start sending chunks"""
@@ -267,8 +278,13 @@ class ClipboardClient:
 
     async def _handle_chunk_data(self, data: Dict[str, Any]):
         """Handle incoming chunk data"""
+        chunk_index = data.get('chunk_index', 0)
+        transfer_id = data.get('transfer_id', '')[:8]
+        self._log(f"Received chunk {chunk_index} for transfer {transfer_id}")
         response = self._transfer_manager.handle_chunk_data(data)
         if response:
+            response_type = response.get('type', 'unknown')
+            self._log(f"Sending {response_type} for chunk {chunk_index}")
             await self._websocket.send(json.dumps(response))
 
     async def _handle_chunk_ack(self, data: Dict[str, Any]):

@@ -112,8 +112,10 @@ class ClipboardServer:
         try:
             async for message in websocket:
                 await self._handle_message(websocket, message)
-        except websockets.exceptions.ConnectionClosed:
-            pass
+        except websockets.exceptions.ConnectionClosed as e:
+            self._log(f"Connection closed: {e.code} {e.reason}")
+        except Exception as e:
+            self._log(f"Handler error: {e}")
         finally:
             self._clients.discard(websocket)
             self._log(f"Client disconnected: {client_addr} (Total: {len(self._clients)})")
@@ -124,6 +126,10 @@ class ClipboardServer:
         try:
             data = json.loads(message)
             msg_type = data.get('type')
+
+            # Log message type for debugging (except frequent ping messages)
+            if msg_type not in ('ping', 'pong'):
+                self._log(f"Received message type: {msg_type}")
 
             if msg_type == 'clipboard':
                 content_type = ContentType(data.get('content_type', 'text'))
@@ -197,17 +203,22 @@ class ClipboardServer:
             elif msg_type == 'chunked_transfer_ack':
                 # Handle acknowledgment - either relay to sender or handle server-initiated
                 transfer_id = data['transfer_id']
+                self._log(f"Received chunked_transfer_ack for transfer {transfer_id[:8]}")
                 info = self._chunked_transfers.get(transfer_id)
                 if info:
                     if info[0] is None:
                         # Server-initiated transfer - handle locally
+                        self._log(f"Processing server-initiated ACK for {info[1]}")
                         await self._handle_server_chunked_ack(data, websocket)
                     elif info[0] != websocket:
                         # Relay to original sender
+                        self._log(f"Relaying ACK to original sender for {info[1]}")
                         try:
                             await info[0].send(message)
                         except Exception:
                             pass
+                else:
+                    self._log(f"Warning: ACK received for unknown transfer {transfer_id[:8]}")
 
             elif msg_type == 'chunk_data':
                 # Relay chunk data to other clients
@@ -269,10 +280,12 @@ class ClipboardServer:
                 self._chunked_transfers.pop(transfer_id, None)
                 await self._broadcast(data, exclude=websocket)
 
-        except json.JSONDecodeError:
-            self._log("Invalid JSON received")
+        except json.JSONDecodeError as e:
+            self._log(f"Invalid JSON received: {e}")
         except Exception as e:
+            import traceback
             self._log(f"Message handling error: {e}")
+            self._log(f"Traceback: {traceback.format_exc()}")
     
     async def _broadcast(self, data: Dict[str, Any], exclude: Optional[WebSocketServerProtocol] = None):
         """Broadcast message to all clients"""
@@ -360,17 +373,21 @@ class ClipboardServer:
 
     async def _broadcast_large_file(self, file_data: FileData):
         """Broadcast a large file using chunked transfer"""
+        self._log(f"Preparing chunked transfer for {file_data.filename}...")
         task = self._transfer_manager.prepare_send(file_data.filename, file_data.content)
         if not task:
             self._log(f"Failed to prepare chunked transfer for {file_data.filename}")
             return
 
         self._chunked_transfers[task.transfer_id] = (None, file_data.filename)  # None = from server
+        self._log(f"Transfer ID: {task.transfer_id[:8]}, registered in _chunked_transfers")
 
         # Broadcast transfer init message
         init_msg = self._transfer_manager.get_transfer_init_message(task)
+        self._log(f"Broadcasting init message to {len(self._clients)} clients...")
         await self._broadcast(init_msg)
         self._log(f"Started chunked broadcast: {file_data.filename} ({len(file_data.content) / 1024 / 1024:.2f}MB)")
+        self._log(f"Waiting for client ACK for transfer {task.transfer_id[:8]}...")
 
         # Wait for acknowledgments and send chunks
         # Note: The actual chunk sending will be triggered by _handle_chunked_ack
@@ -385,23 +402,35 @@ class ClipboardServer:
 
         self._log(f"Client requested {len(needed_chunks)} chunks for {filename}")
 
+        if not needed_chunks:
+            self._log(f"Warning: No chunks requested for {filename}")
+            return
+
         # Send all needed chunks to the requesting client
         total_chunks = len(needed_chunks)
+        sent_count = 0
         for idx, chunk_index in enumerate(needed_chunks):
             chunk_data = self._transfer_manager.get_chunk_data(transfer_id, chunk_index)
             if chunk_data:
                 try:
-                    await websocket.send(json.dumps(chunk_data))
+                    chunk_json = json.dumps(chunk_data)
+                    await websocket.send(chunk_json)
+                    sent_count += 1
                     # Update sending progress
                     send_progress = ((idx + 1) / total_chunks) * 50  # 0-50% for sending
                     self._on_transfer_progress(transfer_id, send_progress)
+                    # Log progress every 10 chunks
+                    if (idx + 1) % 10 == 0 or idx == 0:
+                        self._log(f"Sent chunk {idx + 1}/{total_chunks} for {filename}")
                 except Exception as e:
                     self._log(f"Failed to send chunk {chunk_index}: {e}")
                     break
                 # Small delay to prevent overwhelming
                 await asyncio.sleep(0.01)
+            else:
+                self._log(f"Warning: Could not get data for chunk {chunk_index}")
 
-        self._log(f"Sent {total_chunks} chunks for {filename}, waiting for acknowledgments")
+        self._log(f"Sent {sent_count}/{total_chunks} chunks for {filename}, waiting for acknowledgments")
 
     async def broadcast_clipboard(self, content: str):
         """Legacy method for backward compatibility - broadcasts text content"""
