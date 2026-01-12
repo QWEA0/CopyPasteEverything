@@ -502,14 +502,14 @@ class ClipboardServer:
     
     async def _run_server(self):
         """Run the WebSocket server"""
-        # max_size: Set to 10MB to accommodate large chunks (1MB chunk + compression overhead + base64 encoding)
-        # Default websockets max_size is 1MB which causes disconnection during chunked transfer
+        # max_size: Set to 10MB to accommodate large chunks
+        # ping_interval/ping_timeout: Increased for slow networks and large transfers
         self._server = await websockets.serve(
             self._handler,
             "0.0.0.0",
             self.port,
-            ping_interval=30,
-            ping_timeout=10,
+            ping_interval=60,  # Ping every 60 seconds (was 30)
+            ping_timeout=30,   # Wait 30 seconds for pong (was 10)
             max_size=10 * 1024 * 1024  # 10MB to handle chunked transfer messages
         )
         self._log(f"Server started on port {self.port}")

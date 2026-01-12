@@ -191,7 +191,13 @@ class ClipboardSyncApp:
 
         # Log what we received
         if item.content_type == ContentType.FILES:
-            self._log(f"Received files: {item.file_paths}")
+            # For remote files, content is in file_contents, not file_paths
+            if item.file_contents:
+                filenames = [f.filename for f in item.file_contents]
+                total_size = sum(len(f.content) for f in item.file_contents)
+                self._log(f"Received {len(filenames)} file(s): {filenames}, total {total_size / 1024 / 1024:.2f}MB")
+            else:
+                self._log(f"Received file paths: {item.file_paths}")
         elif item.content_type == ContentType.IMAGE:
             self._log(f"Received image: {len(item.image_data)} bytes")
 

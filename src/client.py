@@ -98,12 +98,12 @@ class ClipboardClient:
             try:
                 self._log(f"Connecting to {self.server_url}...")
                 
-                # max_size: Set to 10MB to accommodate large chunks (1MB chunk + compression overhead + base64 encoding)
-                # Default websockets max_size is 1MB which causes disconnection during chunked transfer
+                # max_size: Set to 10MB to accommodate large chunks
+                # ping_interval/ping_timeout: Increased for slow networks and large transfers
                 async with websockets.connect(
                     self.server_url,
-                    ping_interval=30,
-                    ping_timeout=10,
+                    ping_interval=60,  # Ping every 60 seconds (was 30)
+                    ping_timeout=30,   # Wait 30 seconds for pong (was 10)
                     max_size=10 * 1024 * 1024  # 10MB to handle chunked transfer messages
                 ) as websocket:
                     self._websocket = websocket
