@@ -54,6 +54,7 @@ class MainWindow(ctk.CTk):
         # State
         self._server_running = False
         self._client_connected = False
+        self._client_connecting = False  # True when connecting or reconnecting
     
     def _create_header(self):
         """Create header with title and status"""
@@ -359,7 +360,8 @@ class MainWindow(ctk.CTk):
 
     def _toggle_client(self):
         """Toggle client state"""
-        if self._client_connected:
+        if self._client_connected or self._client_connecting:
+            # Disconnect if connected or cancel if connecting/reconnecting
             self._on_disconnect()
         else:
             url = self._client_url_var.get()
@@ -406,6 +408,7 @@ class MainWindow(ctk.CTk):
     def set_client_connected(self, connected: bool):
         """Update client status"""
         self._client_connected = connected
+        self._client_connecting = False  # No longer connecting
         if connected:
             self._client_status.set_status("online", "Client: ON")
             self._client_detail_status.set_status("online", "Connection: Connected")
@@ -419,10 +422,20 @@ class MainWindow(ctk.CTk):
 
     def set_client_connecting(self):
         """Set client to connecting state"""
+        self._client_connecting = True
         self._client_status.set_status("connecting", "Client: ...")
         self._client_detail_status.set_status("connecting", "Connection: Connecting...")
         self._sync_status.set_status("waiting", "Sync: Waiting")
-        self._connect_btn.configure(text="⏳ CONNECTING")
+        self._connect_btn.configure(text="✖ CANCEL")
+
+    def set_client_reconnecting(self):
+        """Set client to reconnecting state - allows user to cancel"""
+        self._client_connected = False
+        self._client_connecting = True  # Still trying to connect
+        self._client_status.set_status("connecting", "Client: ...")
+        self._client_detail_status.set_status("connecting", "Connection: Reconnecting...")
+        self._sync_status.set_status("waiting", "Sync: Waiting")
+        self._connect_btn.configure(text="✖ CANCEL")
 
     def show_sync_activity(self):
         """Flash sync indicator to show activity"""

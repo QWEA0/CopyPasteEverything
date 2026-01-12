@@ -128,8 +128,13 @@ class ClipboardSyncApp:
     
     def _connect_to_server(self, url: str):
         """Connect to remote server"""
+        # If client exists but stopped, clean it up first
         if self._client:
-            return
+            if not self._client._running:
+                self._client = None
+            else:
+                # Client is still running, don't create another
+                return
 
         self._log(f"Connecting to {url}...")
 
@@ -140,7 +145,8 @@ class ClipboardSyncApp:
             server_url=url,
             on_log=self._log,
             on_clipboard_received=self._on_remote_clipboard,
-            on_connected=self._on_client_connection_change
+            on_connected=self._on_client_connection_change,
+            on_reconnecting=self._on_client_reconnecting
         )
         self._client.start()
 
@@ -206,6 +212,15 @@ class ClipboardSyncApp:
     def _on_client_connection_change(self, connected: bool):
         """Handle client connection state change"""
         self._window.after(0, lambda: self._window.set_client_connected(connected))
+
+        # If disconnected and client stopped, clean up so user can reconnect
+        if not connected and self._client and not self._client._running:
+            self._client = None
+            self._monitor.stop()
+
+    def _on_client_reconnecting(self):
+        """Handle client reconnecting state"""
+        self._window.after(0, lambda: self._window.set_client_reconnecting())
 
     def _copy_from_history(self, content: str):
         """Copy item from history to clipboard"""

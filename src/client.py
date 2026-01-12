@@ -30,13 +30,15 @@ class ClipboardClient:
         server_url: str,
         on_log: Optional[Callable[[str], None]] = None,
         on_clipboard_received: Optional[Callable[[ClipboardItem], None]] = None,
-        on_connected: Optional[Callable[[bool], None]] = None
+        on_connected: Optional[Callable[[bool], None]] = None,
+        on_reconnecting: Optional[Callable[[], None]] = None
     ):
         self.server_url = server_url
         self.on_log = on_log or (lambda x: None)
         self.on_clipboard_received = on_clipboard_received or (lambda x: None)
         self.on_connected = on_connected or (lambda x: None)
-        
+        self.on_reconnecting = on_reconnecting or (lambda: None)
+
         self._websocket: Optional[WebSocketClientProtocol] = None
         self._loop: Optional[asyncio.AbstractEventLoop] = None
         self._thread: Optional[threading.Thread] = None
@@ -92,9 +94,10 @@ class ClipboardClient:
             self._connected = False
             self._websocket = None
             self.on_connected(False)
-            
+
             if self._running:
                 self._log(f"Reconnecting in {self._reconnect_delay}s...")
+                self.on_reconnecting()  # Notify UI that we're reconnecting
                 await asyncio.sleep(self._reconnect_delay)
                 self._reconnect_delay = min(self._reconnect_delay * 2, 30)
     
