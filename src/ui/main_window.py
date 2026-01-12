@@ -101,7 +101,7 @@ class MainWindow(ctk.CTk):
             segmented_button_selected_hover_color=theme.accent_green,
             segmented_button_unselected_color=theme.bg_light,
             segmented_button_unselected_hover_color=theme.bg_hover,
-            text_color=theme.bg_dark,
+            text_color=theme.text_secondary,
             corner_radius=theme.corner_radius
         )
         self._tabview.pack(fill="both", expand=True, padx=10, pady=10)
