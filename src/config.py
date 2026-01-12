@@ -37,6 +37,13 @@ class Config:
     # File transfer settings
     max_file_size: int = 50 * 1024 * 1024  # 50MB per file
     max_total_file_size: int = 100 * 1024 * 1024  # 100MB total per transfer
+
+    # Chunked transfer settings (for large files)
+    chunk_threshold: int = 10 * 1024 * 1024  # 10MB - files larger than this use chunked transfer
+    chunk_size: int = 1 * 1024 * 1024  # 1MB per chunk
+    max_concurrent_transfers: int = 3  # Max concurrent file transfers
+    transfer_timeout: int = 300  # 5 minutes timeout for each transfer
+    resume_enabled: bool = True  # Enable resume for interrupted transfers
     
     # History settings
     history_enabled: bool = True

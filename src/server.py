@@ -3,13 +3,14 @@
 server.py - WebSocket server for clipboard synchronization
 Handles client connections, message broadcasting, and sync coordination
 Supports text, image, and file sync with zstd compression
+Supports chunked transfer for large files (>10MB) with resume capability
 """
 
 import asyncio
 import json
 import hashlib
 import threading
-from typing import Set, Optional, Callable, Dict, Any
+from typing import Set, Optional, Callable, Dict, Any, List
 from datetime import datetime
 import websockets
 from websockets.server import WebSocketServerProtocol
@@ -17,33 +18,71 @@ from websockets.server import WebSocketServerProtocol
 from .clipboard_monitor import ClipboardItem, ContentType, FileData
 from .compression import compress_and_encode, decode_and_decompress, get_compression_stats
 from .config import config
+from .chunked_transfer import (
+    ChunkedTransferManager, TransferTask, TransferState,
+    needs_chunked_transfer, calculate_file_hash
+)
 
 
 class ClipboardServer:
     """
     WebSocket server for clipboard synchronization.
     Broadcasts clipboard changes to all connected clients.
+    Supports chunked transfer for large files (>10MB).
     """
-    
+
     def __init__(
         self,
         port: int = 2580,
         on_log: Optional[Callable[[str], None]] = None,
         on_client_change: Optional[Callable[[int], None]] = None,
-        on_clipboard_received: Optional[Callable[[ClipboardItem], None]] = None
+        on_clipboard_received: Optional[Callable[[ClipboardItem], None]] = None,
+        on_transfer_progress: Optional[Callable[[str, float], None]] = None
     ):
         self.port = port
         self.on_log = on_log or (lambda x: None)
         self.on_client_change = on_client_change or (lambda x: None)
         self.on_clipboard_received = on_clipboard_received or (lambda x: None)
-        
+        self.on_transfer_progress = on_transfer_progress or (lambda x, y: None)
+
         self._clients: Set[WebSocketServerProtocol] = set()
         self._server = None
         self._loop: Optional[asyncio.AbstractEventLoop] = None
         self._thread: Optional[threading.Thread] = None
         self._running = False
         self._last_hash = ""
-    
+
+        # Chunked transfer manager for large files
+        self._transfer_manager = ChunkedTransferManager(
+            on_log=self.on_log,
+            on_progress=self._on_transfer_progress,
+            on_complete=self._on_transfer_complete,
+            on_error=self._on_transfer_error
+        )
+
+        # Track chunked transfers: transfer_id -> (source_websocket, filename)
+        self._chunked_transfers: Dict[str, tuple] = {}
+
+    def _on_transfer_progress(self, transfer_id: str, progress: float):
+        """Handle transfer progress update"""
+        self.on_transfer_progress(transfer_id, progress)
+
+    def _on_transfer_complete(self, transfer_id: str, data: bytes):
+        """Handle completed chunked transfer - notify local clipboard"""
+        info = self._chunked_transfers.pop(transfer_id, None)
+        if info:
+            filename = info[1]
+            self._log(f"Chunked transfer complete: {filename} ({len(data) / 1024 / 1024:.2f}MB)")
+            file_data = FileData(filename=filename, content=data)
+            item = ClipboardItem.from_file_contents([file_data], "remote")
+            self.on_clipboard_received(item)
+
+    def _on_transfer_error(self, transfer_id: str, error: str):
+        """Handle transfer error"""
+        info = self._chunked_transfers.pop(transfer_id, None)
+        if info:
+            self._log(f"Transfer failed for {info[1]}: {error}")
+
     def _log(self, message: str):
         """Thread-safe logging"""
         self.on_log(f"[SERVER] {message}")
@@ -146,6 +185,55 @@ class ClipboardServer:
             elif msg_type == 'ping':
                 await websocket.send(json.dumps({'type': 'pong'}))
 
+            # === Chunked transfer messages - relay between clients ===
+            elif msg_type == 'chunked_transfer_init':
+                # Store transfer info and relay to other clients
+                transfer_id = data['transfer_id']
+                filename = data['filename']
+                self._chunked_transfers[transfer_id] = (websocket, filename)
+                self._log(f"Relaying chunked transfer init: {filename}")
+                await self._broadcast(data, exclude=websocket)
+
+            elif msg_type == 'chunked_transfer_ack':
+                # Relay acknowledgment back to sender
+                transfer_id = data['transfer_id']
+                info = self._chunked_transfers.get(transfer_id)
+                if info and info[0] != websocket:
+                    try:
+                        await info[0].send(message)
+                    except Exception:
+                        pass
+
+            elif msg_type == 'chunk_data':
+                # Relay chunk data to other clients
+                await self._broadcast(data, exclude=websocket)
+
+            elif msg_type == 'chunk_ack':
+                # Relay chunk acknowledgment back to sender
+                transfer_id = data['transfer_id']
+                info = self._chunked_transfers.get(transfer_id)
+                if info and info[0] != websocket:
+                    try:
+                        await info[0].send(message)
+                    except Exception:
+                        pass
+
+            elif msg_type == 'chunk_nack':
+                # Relay negative acknowledgment back to sender
+                transfer_id = data['transfer_id']
+                info = self._chunked_transfers.get(transfer_id)
+                if info and info[0] != websocket:
+                    try:
+                        await info[0].send(message)
+                    except Exception:
+                        pass
+
+            elif msg_type == 'transfer_complete':
+                # Cleanup and relay completion
+                transfer_id = data['transfer_id']
+                self._chunked_transfers.pop(transfer_id, None)
+                await self._broadcast(data, exclude=websocket)
+
         except json.JSONDecodeError:
             self._log("Invalid JSON received")
         except Exception as e:
@@ -196,27 +284,80 @@ class ClipboardServer:
 
         elif item.content_type == ContentType.FILES:
             if item.file_contents:
-                # Send actual file contents
-                files_data = []
-                total_size = 0
-                for file_data in item.file_contents:
-                    encoded, is_compressed = compress_and_encode(file_data.content)
-                    files_data.append({
-                        'filename': file_data.filename,
-                        'content': encoded,
-                        'compressed': is_compressed,
-                        'size': len(file_data.content)
-                    })
-                    total_size += len(file_data.content)
+                # Check for large files that need chunked transfer
+                small_files = []
+                large_files = []
 
-                data['files'] = files_data
-                data['file_count'] = len(files_data)
-                self._log(f"Sending {len(files_data)} file(s), total: {total_size / 1024:.1f}KB")
+                for file_data in item.file_contents:
+                    if needs_chunked_transfer(len(file_data.content)):
+                        large_files.append(file_data)
+                    else:
+                        small_files.append(file_data)
+
+                # Send small files normally
+                if small_files:
+                    files_data = []
+                    total_size = 0
+                    for file_data in small_files:
+                        encoded, is_compressed = compress_and_encode(file_data.content)
+                        files_data.append({
+                            'filename': file_data.filename,
+                            'content': encoded,
+                            'compressed': is_compressed,
+                            'size': len(file_data.content)
+                        })
+                        total_size += len(file_data.content)
+                    data['files'] = files_data
+                    data['file_count'] = len(files_data)
+                    self._log(f"Sending {len(files_data)} small file(s), total: {total_size / 1024:.1f}KB")
+                    await self._broadcast(data)
+
+                # Send large files via chunked transfer
+                for file_data in large_files:
+                    await self._broadcast_large_file(file_data)
+
+                return  # Already sent above
             else:
                 # Fallback to just paths (for local-only use)
                 data['file_paths'] = item.file_paths
 
         await self._broadcast(data)
+
+    async def _broadcast_large_file(self, file_data: FileData):
+        """Broadcast a large file using chunked transfer"""
+        task = self._transfer_manager.prepare_send(file_data.filename, file_data.content)
+        if not task:
+            self._log(f"Failed to prepare chunked transfer for {file_data.filename}")
+            return
+
+        self._chunked_transfers[task.transfer_id] = (None, file_data.filename)  # None = from server
+
+        # Broadcast transfer init message
+        init_msg = self._transfer_manager.get_transfer_init_message(task)
+        await self._broadcast(init_msg)
+        self._log(f"Started chunked broadcast: {file_data.filename} ({len(file_data.content) / 1024 / 1024:.2f}MB)")
+
+        # Wait for acknowledgments and send chunks
+        # Note: The actual chunk sending will be triggered by _handle_chunked_ack
+
+    async def _handle_server_chunked_ack(self, data: Dict[str, Any], websocket: WebSocketServerProtocol):
+        """Handle acknowledgment for server-initiated chunked transfer"""
+        transfer_id = data['transfer_id']
+        needed_chunks = data.get('needed_chunks', [])
+
+        self._log(f"Client requested {len(needed_chunks)} chunks for {transfer_id}")
+
+        # Send all needed chunks to the requesting client
+        for chunk_index in needed_chunks:
+            chunk_data = self._transfer_manager.get_chunk_data(transfer_id, chunk_index)
+            if chunk_data:
+                try:
+                    await websocket.send(json.dumps(chunk_data))
+                except Exception as e:
+                    self._log(f"Failed to send chunk {chunk_index}: {e}")
+                    break
+                # Small delay to prevent overwhelming
+                await asyncio.sleep(0.01)
 
     async def broadcast_clipboard(self, content: str):
         """Legacy method for backward compatibility - broadcasts text content"""
